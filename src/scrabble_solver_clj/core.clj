@@ -1,8 +1,12 @@
 (ns scrabble-solver-clj.core)
 
-(def test-board '([0 0 :right "alphabet"]
-                  [2 0 :bottom "piano"]
-                  [2 2 :right "annee"]))
+(def test-board '([2 4 :bottom "boitant"]
+                  [1 5 :right "souks"]
+                  [0 10 :right "jeteras"]
+                  [5 0 :bottom "pathos"]))
+
+(def cross-board '([0 0 :right "annee"]
+                   [1 0 :bottom "nez"]))
 
 (defn opposite-direction
   [direction]
@@ -50,27 +54,29 @@
                       (current [x y])))
 
         :let [tiles (tiles-taken [x y direction w])
-              blanks (into #{} (filter
-                                 (fn [[a b]]
-                                   (let [letter (nth board-letters (+ a (* b 11)))]
-                                     (nil? letter)))
-                                 tiles))
+              blanks (into #{}
+                           (filter
+                             (fn [[a b]] (nil? (nth board-letters (+ a (* b 11)))))
+                             tiles))
               first-tile (first tiles)
-              last-tile (last tiles)
-              prev-tile (next first-tile -1)
-              next-tile (next last-tile 1)]
-
+              last-tile (last tiles)]
+        
+        ;; Does have a blank tile
         :when (not-empty blanks)
 
-        :when (or (not (> (current first-tile) 0))
-                  (nil? (nth board-letters
-                             (+ (nth prev-tile 0)
-                                (* 11 (nth prev-tile 1))))))
+        ;; Preceding tile is not taken
+        :when (or (= (current first-tile) 0)
+                  (let [[x y] (next first-tile -1)]
+                    (nil? (nth board-letters
+                               (+ x (* 11 y))))))
 
-        :when (or (not (< (current last-tile) 10))
-                  (nil? (nth board-letters
-                             (+ (nth next-tile 0) 
-                                (* 11 (nth next-tile 1))))))
+        ;; Next tile is not taken
+        :when (or (= (current last-tile) 10)
+                  (let [[x y] (next last-tile 1)]
+                    (nil? (nth board-letters
+                               (+ x (* 11 y))))))
+
+        ;; At least one tile has a neighbour
         :when (some
                 (fn [[a b]]
                   (or
@@ -83,7 +89,33 @@
                     (and (> b 0)
                          (some? (nth board-letters (+ a (* (dec b) 11)))))))
                 blanks)]
+
     [x y direction w]))
+
+(defn wordspec-to-integers
+  [[x y direction word-or-width]]
+  [x y (if-right direction 0 1)
+   (if (string? word-or-width)
+     (count word-or-width)
+     word-or-width)])
+
+(defn find-crosses
+  [positions positions-into]
+  (apply hash-map
+         (mapcat
+           (fn [wordspec]
+             [(wordspec-to-integers wordspec)
+              (let [tiles (into #{} (tiles-taken wordspec))]
+                (->> positions-into
+                     (map
+                       (fn [wordspec]
+                         (->> wordspec
+                              (tiles-taken)
+                              (into #{})
+                              (clojure.set/intersection tiles)
+                              (vector wordspec))))
+                     (filter (fn [[_ ts]] (not-empty ts)))))])
+           positions)))
 
 (defn build-tiles-letter-mapping
   [board]
@@ -151,32 +183,24 @@
 
 (defn diff-board
   [a b]
-  (for [x (range 11)
-        y (range 11)
-        :let [i (+ x (* 11 y))]
-        :when (and (nil? (nth a i))
-                   (some? (nth b i)))]
-    [a b]))
+  (into #{}
+        (for [x (range 11)
+              y (range 11)
+              :let [i (+ x (* 11 y))]
+              :when (and (nil? (nth b i))
+                         (some? (nth a i)))]
+          [x y])))
 
 (defn rotate-board
   [board]
   (map (fn [[x y direction word]]
          [y x (opposite-direction direction) word]) board))
 
-(defn get-extended-board-words
-  [board direction]
-  (mapcat (fn [[x y dir word :as wordspec]]
-            (if (= dir direction)
-              `(~wordspec)
-              (map (fn [[a b] letter] [a b direction (str letter)])
-                   (tiles-taken wordspec) word)))
-          board))
-
 (defn find-all-possible-words
   [board-letters available-letters-freq positions]
   (map (fn [[x y direction width :as wordspec]]
          [x y direction width
-          (map first
+          (->> words-freq-list
                (filter
                  (fn [[word target-word-freq]]
                    (and
@@ -191,54 +215,124 @@
                            (and
                              (or (nil? board-letter)
                                  (= letter board-letter)))))
-                       (map vector (tiles-taken wordspec) word))
-
-                     ;; No letters are missing
-                     (let* [njokers (:? available-letters-freq 0)
-                            total-available-letters-freq
-                            (sum-freq-lists (dissoc available-letters-freq :?)
-                                            (read-freq-from-board board-letters wordspec))
-                            freq-diff (sum-freq-lists target-word-freq
-                                                      (scale-freq total-available-letters-freq -1))
-                            nmissing (get-positive-freq-sum freq-diff)] 
-                       (<= nmissing njokers))))
-
-                 words-freq-list))])
+                       (map vector (tiles-taken wordspec) word)))))
+               
+               (map #(update % 1
+                             sum-freq-lists
+                             (scale-freq (read-freq-from-board board-letters wordspec) -1)))
+               
+               (filter (fn [[word needed-letters-freq]]
+                         ;; No letters are missing
+                         (let [njokers (:? available-letters-freq 0)
+                               freq-diff (sum-freq-lists needed-letters-freq
+                                                         (scale-freq (dissoc available-letters-freq :?)
+                                                                     -1))
+                               nmissing (get-positive-freq-sum freq-diff)] 
+                           (<= nmissing njokers)))))])
        positions))
 
-(defn denormalize
-  [words]
-  (->> words
-       (filter (comp not-empty #(nth % 4)))
-       (mapcat (fn [[x y direction width ws]]
-                 (map (fn [w] [x y direction w]) ws)))))
+(defn find-word-crosses
+  [board board-letters solutions crosses]
+  (->> solutions
+       (map (fn [[x y direction :as words]]
+              (update
+                words 4
+                (partial map
+                         (fn [[word freq]]
+                           (let [new-board (build-tiles-letter-mapping
+                                             (cons [x y direction word] board))
 
-(defn find-crosses
-  [wordspec opposite-direction-words]
-  (let [tiles (into #{} (tiles-taken wordspec))]
-    (filter
-      (fn [[x y direction word]]
-        (not-empty
-          (clojure.set/intersection
-            tiles
-            (into #{} (tiles-taken [x y (opposite-direction direction) word])))))
-      opposite-direction-words)))
+                                 new-letters (diff-board new-board board-letters)
 
-(defn cross-word-sets
-  [h-words v-words]
-  [(map (fn [wordspec]
-          {:wordspec wordspec :crosses (find-crosses wordspec v-words)})
-        h-words)])
+                                 crosses (get crosses
+                                              (wordspec-to-integers [x y direction word])
+                                              '())
+
+                                 intersections
+                                 (->> crosses
+                                      (filter (comp
+                                                not-empty
+                                                (partial clojure.set/intersection new-letters)
+                                                second))
+
+                                      (filter (fn [[[x y direction width]]]
+                                                (= 1
+                                                   (count
+                                                     (filter #(nil? (nth board-letters
+                                                                         (+ (first %)
+                                                                            (* 11 (second %)))))
+                                                             (tiles-taken [x y direction width]))))))
+
+                                      (mapcat (fn [[[x y direction width] join-tiles]]
+                                                (->> join-tiles
+                                                     (into '())
+                                                     (map (fn [tile]
+                                                            (->> (+ (first tile)
+                                                                    (* 11 (second tile)))
+                                                                 (nth new-board)
+                                                                 (conj [x y (if-right direction 0 1)]))))))))]
+                             
+                             [word intersections]))))))))
+
+(defn build-1l-word-set
+  [solutions]
+  (->> solutions
+       (map (fn [[x y direction width words]]
+              (->> words
+                   (filter (fn [[word freq]]
+                             (= 1 (get-positive-freq-sum freq))))
+
+                   (keep (fn [[word freq]]
+                           (hash-map
+                             [x y
+                              (if-right direction 0 1)
+                              (some->> (get (clojure.set/map-invert freq) 1)
+                                       (name)
+                                       (first))]
+                             [x y direction word])))
+                   (apply merge))))
+       (apply merge)))
+
+(defn filter-invalid-words [words]
+  (->> (concat (:h-w-crosses result) (:v-w-crosses result))
+       (map #(update % 4
+                     (partial sequence
+                              (comp
+                                (map (fn [[word crosses]]
+                                       [word (map (partial get (:l1-w result)) crosses)]))
+                                (filter (comp (partial not-any? nil?) second))))))
+       (filter (comp not-empty #(nth % 4)))))
 
 (defn find-solutions
   [board letters]
-  (let* [board-letters (build-tiles-letter-mapping board)
-         available-letters-freq (get-letter-frequency letters)
-         words (->> (find-positions board-letters)
-                    (find-all-possible-words
-                      board-letters
-                      available-letters-freq)
-                    (denormalize))]
+  (let [board-letters (build-tiles-letter-mapping board)
+        available-letters-freq (get-letter-frequency letters)
+        positions (find-positions board-letters)
 
-    words))
+        {h-positions :right v-positions :bottom} (group-by #(nth % 2) positions)
 
+        h-crosses (find-crosses h-positions v-positions)
+        v-crosses (find-crosses v-positions h-positions)
+
+        {h-words :right v-words :bottom} (->> positions
+                                              (find-all-possible-words
+                                                board-letters
+                                                available-letters-freq)
+                                              (filter #(not-empty (nth % 4)))
+                                              (group-by #(nth % 2)))
+        
+        l1-word-set (build-1l-word-set (concat h-words v-words))
+        
+        h-word-crosses (find-word-crosses board board-letters h-words h-crosses)
+        v-word-crosses (find-word-crosses board board-letters v-words v-crosses)
+
+        valid-words (filter-invalid-words (concat h-words v-words))]
+
+    {:h-words h-words
+     :v-words v-words
+     :h-crosses h-crosses
+     :v-crosses v-crosses
+     :h-w-crosses h-word-crosses
+     :v-w-crosses v-word-crosses
+     :l1-w l1-word-set
+     :valid-words valid-words}))
