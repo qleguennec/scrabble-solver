@@ -4,18 +4,20 @@
             [clojure.string :as s]))
 
 (def letter-values
-  {:a 1 :b 3 :c 3 :d 2 :e 1 :f 4 :g 2 :h 4 :i 1 :j 8 :k 10 :l 1 :m 2 :n 1 :o 1 :p 3 :q 8 :r 1 :s 1 :t 1 :u 2 :v 8 :w 10 :x 10 :y 10 :z 10})
+  {:a 1 :b 3 :c 3 :d 2 :e 1 :f 4 :g 2 :h 5 :i 1 :j 8 :k 10 :l 1 :m 2 :n 1 :o 1 :p 3 :q 10 :r 1 :s 1 :t 1 :u 2 :v 8 :w 10 :x 10 :y 10 :z 10})
 
 (def bonuses
   (hash-map
-    [0 0] :l3 [2 0] :w3 [8 0] :w2 [10 0] :l3 [1 1] :w2 [5 1] :w2 [9 1] :w2 [0 2] :w3 [2 2] :l3 [4 2] :l3 [6 2] :l2 [8 2] :l3 [10 2] :w3 [3 3] :l3 [7 3] :l3 [2 4] :l2 [8 4] :l2 [1 5] :w2 [9 5] :w2 [2 6] :l2 [8 6] :l2 [3 7] :l3 [7 7] :l3 [0 8] :w3 [2 8] :l3 [6 8] :l2 [8 8] :l3 [10 8] :w3 [1 9] :w2 [5 9] :w2 [9 9] :w2 [0 10] :l3 [2 10] :w3 [8 10] :w3 [10 10] :l3))
+    [0 0] :l3 [2 0] :w3 [8 0] :w3 [10 0] :l3 [1 1] :w2 [5 1] :w2 [9 1] :w2 [0 2] :w3 [2 2] :l3 [4 2] :l2 [6 2] :l2 [8 2] :l3 [10 2] :w3 [3 3] :l3 [7 3] :l3 [2 4] :l2 [8 4] :w2 [1 5] :w2 [9 5] :l2 [2 6] :l2 [8 6] :l3 [3 7] :l3 [7 7] :l3 [0 8] :l3 [2 8] :l2 [4 8] :l2 [6 8] :l2 [8 8] :l3 [10 8] :w3 [1 9] :w2 [5 9] :w2 [9 9] :w2 [0 10] :l3 [2 10] :w3 [8 10] :w3 [10 10] :l3))
 
 (def cross-board '([0 0 :right "annee"]
                    [1 0 :bottom "nez"]))
 
 (def albot '([1 5 :right "osiez"]
              [2 0 :bottom "rubans"]
-             [1 2 :right "aboyez"]))
+             [1 2 :right "aboyez"]
+             [1 1 :bottom "vas"]
+             [6 0 :bottom "furie"]))
 
 (defn opposite-direction
   [direction]
@@ -51,56 +53,62 @@
 
 (defn find-positions
   [board-letters]
-  (group-by #(nth % 2)
-            (for [x (range 0 11)
-                  y (range 0 11)
-                  [direction current next] [[:right
-                                             (fn [[x y]] x)
-                                             (fn [[x y] i] [(+ i x) y])]
-                                            [:bottom
-                                             (fn [[x y]] y)
-                                             (fn [[x y] i] [x (+ i y)])]]
-                  w (range 2 (- (inc 11)
-                                (current [x y])))
+  (let [first-word? (not-any? some? board-letters)]
+    (group-by #(nth % 2)
+              (for [x (if first-word? [5 0] (range 0 11))
+                    y (if first-word? [0 5] (range 0 11))
+                    [direction current next] [[:right
+                                               (fn [[x y]] x)
+                                               (fn [[x y] i] [(+ i x) y])]
+                                              [:bottom
+                                               (fn [[x y]] y)
+                                               (fn [[x y] i] [x (+ i y)])]]
+                    w (range 2 (- (inc 11)
+                                  (current [x y])))
 
-                  :let [tiles (tiles-taken [x y direction w])
-                        blanks (into #{}
-                                     (filter
-                                       (fn [[a b]] (nil? (nth board-letters (+ a (* b 11)))))
-                                       tiles))
-                        first-tile (first tiles)
-                        last-tile (last tiles)]
-                  
-                  ;; Does have a blank tile
-                  :when (not-empty blanks)
+                    :let [tiles (tiles-taken [x y direction w])
+                          blanks (into #{}
+                                       (filter
+                                         (fn [[a b]] (nil? (nth board-letters (+ a (* b 11)))))
+                                         tiles))
+                          first-tile (first tiles)
+                          last-tile (last tiles)]
+                    
+                    ;; Does have a blank tile
+                    :when (not-empty blanks)
 
-                  ;; Preceding tile is not taken
-                  :when (or (= (current first-tile) 0)
-                            (let [[x y] (next first-tile -1)]
-                              (nil? (nth board-letters
-                                         (+ x (* 11 y))))))
+                    ;; Preceding tile is not taken
+                    :when (or (= (current first-tile) 0)
+                              (let [[x y] (next first-tile -1)]
+                                (nil? (nth board-letters
+                                           (+ x (* 11 y))))))
 
-                  ;; Next tile is not taken
-                  :when (or (= (current last-tile) 10)
-                            (let [[x y] (next last-tile 1)]
-                              (nil? (nth board-letters
-                                         (+ x (* 11 y))))))
+                    ;; Next tile is not taken
+                    :when (or (= (current last-tile) 10)
+                              (let [[x y] (next last-tile 1)]
+                                (nil? (nth board-letters
+                                           (+ x (* 11 y))))))
 
-                  ;; At least one tile has a neighbour
-                  :when (some
-                          (fn [[a b]]
-                            (or
-                              (and (< a 10)
-                                   (some? (nth board-letters (+ (inc a) (* b 11)))))
-                              (and (< b 10)
-                                   (some? (nth board-letters (+ a (* (inc b) 11)))))
-                              (and (> a 0)
-                                   (some? (nth board-letters (+ (dec a) (* b 11)))))
-                              (and (> b 0)
-                                   (some? (nth board-letters (+ a (* (dec b) 11)))))))
-                          blanks)]
+                    ;; First word hits middle
+                    :when (or (not first-word?)
+                              (not-empty (filter #{[5 5]} tiles)))
 
-              [x y direction w])))
+                    ;; At least one tile has a neighbour
+                    :when (or first-word?
+                              (some
+                                (fn [[a b]]
+                                  (or
+                                    (and (< a 10)
+                                         (some? (nth board-letters (+ (inc a) (* b 11)))))
+                                    (and (< b 10)
+                                         (some? (nth board-letters (+ a (* (inc b) 11)))))
+                                    (and (> a 0)
+                                         (some? (nth board-letters (+ (dec a) (* b 11)))))
+                                    (and (> b 0)
+                                         (some? (nth board-letters (+ a (* (dec b) 11)))))))
+                                blanks))]
+
+                [x y direction w]))))
 
 (defn wordspec-to-integers
   [[x y direction word-or-width]]
@@ -377,8 +385,9 @@
                    joker (and scored (nil? (get available-letters key-letter)))]
                
                {:score (+ score (* (if joker 0 value)
-                                   (if scored 
-                                     (get {:l2 2 :l3 3} bonus 1) 1)))
+                                   (if scored
+                                     (get {:l2 2 :l3 3} bonus 1)
+                                     1)))
 
                 :available-letters (if (and scored (not joker))
                                      (update available-letters key-letter - 1)
@@ -423,4 +432,4 @@
 
         scores (map (fn [s] [(get-score available-letters-freq board-letters s) s]) solutions)]
 
-    (take 20 (sort-by first > scores))))
+    (take 30 (sort-by first > scores))))
