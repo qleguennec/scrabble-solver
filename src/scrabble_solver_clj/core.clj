@@ -10,15 +10,6 @@
   (hash-map
     [0 0] :l3 [2 0] :w3 [8 0] :w3 [10 0] :l3 [1 1] :w2 [5 1] :w2 [9 1] :w2 [0 2] :w3 [2 2] :l3 [4 2] :l2 [6 2] :l2 [8 2] :l3 [10 2] :w3 [3 3] :l3 [7 3] :l3 [2 4] :l2 [8 4] :w2 [1 5] :w2 [9 5] :l2 [2 6] :l2 [8 6] :l3 [3 7] :l3 [7 7] :l3 [0 8] :l3 [2 8] :l2 [4 8] :l2 [6 8] :l2 [8 8] :l3 [10 8] :w3 [1 9] :w2 [5 9] :w2 [9 9] :w2 [0 10] :l3 [2 10] :w3 [8 10] :w3 [10 10] :l3))
 
-(def cross-board '([0 0 :right "annee"]
-                   [1 0 :bottom "nez"]))
-
-(def albot '([1 5 :right "osiez"]
-             [2 0 :bottom "rubans"]
-             [1 2 :right "aboyez"]
-             [1 1 :bottom "vas"]
-             [6 0 :bottom "furie"]))
-
 (defn opposite-direction
   [direction]
   (if (= direction :right)
