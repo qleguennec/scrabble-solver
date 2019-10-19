@@ -4,11 +4,14 @@
             [clojure.string :as s]))
 
 (def letter-values
-  {:a 1 :b 3 :c 3 :d 2 :e 1 :f 4 :g 2 :h 5 :i 1 :j 8 :k 10 :l 1 :m 2 :n 1 :o 1 :p 3 :q 10 :r 1 :s 1 :t 1 :u 2 :v 8 :w 10 :x 10 :y 10 :z 10})
+  {\a 1 \b 3 \c 3 \d 2 \e 1 \f 4 \g 2 \h 5 \i 1 \j 8 \k 10 \l 1 \m 2 \n 1 \o 1 \p 3 \q 10 \r 1 \s 1 \t 1 \u 2 \v 8 \w 10 \x 10 \y 10 \z 10})
 
 (def bonuses
   (hash-map
     [0 0] :l3 [2 0] :w3 [8 0] :w3 [10 0] :l3 [1 1] :w2 [5 1] :w2 [9 1] :w2 [0 2] :w3 [2 2] :l3 [4 2] :l2 [6 2] :l2 [8 2] :l3 [10 2] :w3 [3 3] :l3 [7 3] :l3 [2 4] :l2 [8 4] :w2 [1 5] :w2 [9 5] :l2 [2 6] :l2 [8 6] :l3 [3 7] :l3 [7 7] :l3 [0 8] :l3 [2 8] :l2 [4 8] :l2 [6 8] :l2 [8 8] :l3 [10 8] :w3 [1 9] :w2 [5 9] :w2 [9 9] :w2 [0 10] :l3 [2 10] :w3 [8 10] :w3 [10 10] :l3))
+
+(def available-letters
+  {\a 5 \b 1 \c 1 \d 2 \e 7 \f 1 \g 1 \h 1 \i 4 \j 1 \k 1 \l 2 \m 1 \n 2 \o 4 \p 1 \q 1 \r 2 \s 4 \t 2 \u 1 \v 1 \w 1 \x 1 \y 1 \z 1 \? 2})
 
 (defn opposite-direction
   [direction]
@@ -37,10 +40,6 @@
   (some (fn [[a b]] (and (= a x)
                         (= b y)))
         (apply concat (map tiles-taken board))))
-
-(defn get-letter-frequency
-  [word]
-  (frequencies (map (comp keyword str) word)))
 
 (defn find-positions
   [board-letters]
@@ -141,60 +140,35 @@
       board)))
 
 (def empty-freq-list
-  (zipmap
-    (map (comp keyword str char) (range 97 123))
-    (repeat 0)))
+  (frequencies (map char (range 97 123))))
 
 (def valid-words
   (with-open [rdr (clojure.java.io/reader "resources/words")]
     (map clojure.string/lower-case (into [] (line-seq rdr)))))
 
 (def letter-frequency-list
-  (map get-letter-frequency valid-words))
+  (map frequencies valid-words))
 
 (def words-freq-list
   (->> (map vector valid-words letter-frequency-list)
        (shuffle)
        (into [])))
 
-(defn scale-freq
-  [freq factor]
-  (reduce-kv
-    (fn [m k v] (update m k * factor)) freq freq))
-
 (defn get-positive-freq-sum
   [freq-list]
-  (reduce-kv (fn [m k v] (if (> v 0)
-                          (+ m v)
-                          m))
-             0
-             freq-list))
-
-(defn sum-freq-lists
-  [& freq-lists]
-  (reduce
-    (fn [acc k] (assoc acc
-                      k
-                      (apply +
-                             (map #(k % 0) freq-lists))))
-    {}
-    (map (comp keyword str char) (range 97 123))))
+  (reduce-kv (fn [m k v] (if (> v 0) (+ m v) m)) 0 freq-list))
 
 (defn read-letter
   [board-letters [x y]]
   (nth board-letters
        (+ x (* 11 y))))
 
-(defn read-letters-from-board
-  [board-letters wordspec]
-  (map (partial read-letter board-letters)
-       (tiles-taken wordspec)))
-
 (defn read-freq-from-board
   [board-letters wordspec]
-  (get-letter-frequency 
-    (apply str
-           (filter some? (read-letters-from-board board-letters wordspec)))))
+  (->> (tiles-taken wordspec)
+       (map (partial read-letter board-letters))
+       (filter some?)
+       (frequencies)))
 
 (defn diff-board
   [a b]
@@ -230,19 +204,14 @@
 
 (defn compute-needed-letters
   [{:keys [board-letters]} wordspec [word freq]]
-  [word
-   (sum-freq-lists
-     (scale-freq (read-freq-from-board board-letters wordspec) -1)
-     freq)])
+  [word (merge-with - (read-freq-from-board board-letters wordspec) freq)])
 
 (defn enough-letters?
   [{:keys [board-letters available-letters-freq]}
    [x y direction width :as wordspec]
    [word freq]]
   (if (let [njokers (:? available-letters-freq 0)
-            freq-diff (sum-freq-lists freq
-                                      (scale-freq (dissoc available-letters-freq :?)
-                                                  -1))
+            freq-diff (merge-with - freq (dissoc available-letters-freq :?))
             nmissing (get-positive-freq-sum freq-diff)] 
         (<= nmissing njokers))
     [word freq]
@@ -349,20 +318,11 @@
        (filter (comp (partial not-any? nil?)
                      #(get % 5)))))
 
-(defn remove-once [pred coll]
-  ((fn inner [coll]
-     (lazy-seq
-       (when-let [[x & xs] (seq coll)]
-         (if (pred x)
-           xs
-           (cons x (inner xs))))))
-   coll))
-
 (defn get-score
   [available-letters-freq board-letters [x y direction word letters intersections]]
   (let [tiles (tiles-taken [x y direction word])
         scored (map (comp nil? (partial read-letter board-letters)) tiles)
-        values (map (comp (partial get letter-values) keyword str) word)
+        values (map (partial get letter-values) word)
         bonuses (map (fn [[s b]] (if s (get bonuses b) nil)) (map vector scored tiles))
         w2 (not-empty (filter #{:w2} bonuses))
         w3 (not-empty (filter #{:w3} bonuses))]
@@ -372,16 +332,13 @@
            (fn [{:keys [score available-letters] :as m}
                [[x y] scored l value bonus]]
 
-             (let [key-letter (keyword (str l))
-                   joker (and scored (nil? (get available-letters key-letter)))]
+             (let [joker (and scored (zero? (get available-letters l 1)))]
                
                {:score (+ score (* (if joker 0 value)
-                                   (if scored
-                                     (get {:l2 2 :l3 3} bonus 1)
-                                     1)))
+                                   (if scored (get {:l2 2 :l3 3} bonus 1) 1)))
 
                 :available-letters (if (and scored (not joker))
-                                     (update available-letters key-letter - 1)
+                                     (update available-letters l - 1)
                                      available-letters)}))
            
            {:score 0
@@ -398,7 +355,7 @@
 (defn find-solutions
   [board letters]
   (let [board-letters (build-tiles-letter-mapping board)
-        available-letters-freq (get-letter-frequency letters)
+        available-letters-freq (frequencies letters)
 
         {h-positions :right v-positions :bottom} (find-positions board-letters)
 
