@@ -1,7 +1,8 @@
 (ns scrabble-solver-clj.core
   (:require [clojure.set :as set]
             [clojure.core.reducers :as r]
-            [clojure.string :as s])
+            [clojure.string :as s]
+            [clojure.math.combinatorics :as combo])
   (:use [scrabble-solver-clj.tree-dic]))
 
 (def debug-on true)
@@ -195,19 +196,29 @@
                                  (group-by :direction))
         state {:board board
                :board-letters board-letters
-               :available-letters-freq available-letters-freq
                :one-blank-h-positions (:right one-blank-positions)
-               :one-blank-v-positions (:bottom one-blank-positions)}]
+               :one-blank-v-positions (:bottom one-blank-positions)}
 
-    (->> positions
-         (mapcat (fn [position]
-                   (->> (tiles-taken position)
-                        (map (partial read-letter board-letters))
-                        (lookup word-dic available-letters-freq)
-                        (map #(merge {:word % :word-freq (full-freq %)} position)))))
-         (keep (partial other-words-valid? state))
-         (map (fn [{:keys [other-words] :as wordstate}]
-                (cons (dissoc wordstate :other-words) other-words))))))
+        njokers (get available-letters-freq \? 0)
+
+        freq-combinations
+        (->> (range (inc njokers))
+             (map (partial combo/combinations (map #(vector (char (+ 97 %)) 1) (range 26))))
+             (mapcat (partial map (partial into {})))
+             (map (partial merge-with + (dissoc available-letters-freq \?))))]
+
+    freq-combinations
+    (->> freq-combinations
+         (mapcat (fn [freq]
+                   (->> positions
+                        (mapcat (fn [position]
+                                  (->> (tiles-taken position)
+                                       (map (partial read-letter board-letters))
+                                       (lookup word-dic freq)
+                                       (map #(merge {:word % :word-freq (full-freq %)} position)))))
+                        (keep (partial other-words-valid? (assoc state :available-letters freq)))
+                        (map (fn [{:keys [other-words] :as wordstate}]
+                               (cons (dissoc wordstate :other-words) other-words)))))))))
 
 (defn get-score
   [available-letters-freq board-letters [x y direction word letters intersections]]
