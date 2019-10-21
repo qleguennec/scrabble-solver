@@ -1,8 +1,8 @@
 (ns scrabble-solver-clj.core
   (:require [clojure.set :as set]
             [clojure.core.reducers :as r]
-            [clojure.string :as s]
-            [tesser.core :as t]))
+            [clojure.string :as s])
+  (:use [scrabble-solver-clj.tree-dic]))
 
 (def debug-on true)
 
@@ -119,16 +119,11 @@
           (with-open [rdr (clojure.java.io/reader "resources/words")]
             (map clojure.string/lower-case (into [] (line-seq rdr))))))
 
+(def word-dic
+  (build-dic valid-words))
+
 (def valid-words-set
   (into #{} valid-words))
-
-(def letter-frequency-list
-  (map full-freq valid-words))
-
-(def words-freq-list
-  (->> (map vector valid-words letter-frequency-list)
-       (shuffle)
-       (into [])))
 
 (defn read-letter
   [board-letters [x y]]
@@ -163,35 +158,6 @@
                 {:x y :y x :direction (opposite-direction direction)}))
        board))
 
-(defn fits-in-slot?
-  [{:keys [board-letters]} {:keys [word width] :as wordstate}]
-  (if (and
-        ;; Is strictly equal to the slot width
-        (= (count word) width)
-
-        ;; Does contain all the non blank slots
-        (->> word
-             (map vector (tiles-taken wordstate))
-             (every?
-               (fn [[pos letter]]
-                 (let [board-letter (read-letter board-letters pos)]
-                   (or (nil? board-letter)
-                       (= letter board-letter)))))))
-    wordstate
-    nil))
-
-(defn enough-letters?
-  [{:keys [board-letters available-letters-freq]}
-   {:keys [word-freq] :as wordstate}]
-  (let [needed-letters-freq (merge-with - word-freq (read-freq-from-board board-letters wordstate))
-        njokers (get available-letters-freq \? 0)
-        freq-diff (merge-with - (dissoc available-letters-freq \?) needed-letters-freq)
-        nmissing (- (reduce + (filter neg? (map second freq-diff))))] 
-    
-    (if (>= njokers nmissing)
-      (assoc wordstate :used-letters-freq needed-letters-freq)
-      nil)))
-
 (defn other-words-valid?
   [{:keys [board-letters
            available-letters-freq
@@ -222,15 +188,6 @@
       (assoc wordstate :other-words other-words)
       nil)))
 
-(defn seek-transducer
-  [state [word word-freq]]
-  (comp (map (fn [{:keys [x y direction] :as wordstate}]
-               (some->> (merge wordstate {:word word :word-freq word-freq})
-                        (fits-in-slot? state)
-                        (enough-letters? state)
-                        (other-words-valid? state))))
-        (filter some?)))
-
 (defn find-all-possible-words
   [board board-letters available-letters-freq positions]
   (let [one-blank-positions (->> positions
@@ -239,22 +196,18 @@
         state {:board board
                :board-letters board-letters
                :available-letters-freq available-letters-freq
-               :positions positions
                :one-blank-h-positions (:right one-blank-positions)
                :one-blank-v-positions (:bottom one-blank-positions)}]
-    
-    (r/fold
-      r/cat
-      (fn [acc word] (transduce
-                      (seek-transducer state word)
-                      (fn
-                        ([] {})
-                        ([s] s)
-                        ([s {:keys [other-words] :as wordstate}]
-                         (cons (cons wordstate other-words) s)))
-                      acc
-                      positions))
-      words-freq-list)))
+
+    (->> positions
+         (mapcat (fn [position]
+                   (->> (tiles-taken position)
+                        (map (partial read-letter board-letters))
+                        (lookup word-dic available-letters-freq)
+                        (map #(merge {:word % :word-freq (full-freq %)} position)))))
+         (keep (partial other-words-valid? state))
+         (map (fn [{:keys [other-words] :as wordstate}]
+                (cons (dissoc wordstate :other-words) other-words))))))
 
 (defn get-score
   [available-letters-freq board-letters [x y direction word letters intersections]]
@@ -310,7 +263,8 @@
 
 (defn show-solution
   [solution]
-  (map (fn [{:keys [x y direction word]}] [x y direction word]) solution))
+  (map (fn [{:keys [x y direction word]}] [x y direction word])
+       solution))
 
 (defn play [nplayers]
   ((fn [{:keys [board draw turn available-letters] :as state}]
@@ -343,7 +297,7 @@
 
                (do
                  (println "player" (inc player) "has played the word")
-                 (pprint (show-solutions solution))
+                 (pprint (show-solution solution))
                  (println "player letters: ")
                  (pprint (get player available-letters-after-play))
                  (println "remaining letters:" (count remaining-letters)))
