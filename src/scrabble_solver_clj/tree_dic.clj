@@ -25,22 +25,25 @@
   [words]
   (reduce insert-word empty-dic words))
 
+(def lookup-rec
+  (memoize
+    (fn [dic freq word [l & r] i]
+      (if (not-empty dic)
+        (let [[words l-dic] (nth dic i)]
+          (if (= (count word) i)
+            words
+            (if (some? l)
+              (lookup-rec (nth l-dic (- (int l) 97)) freq word r (inc i))
+              (->> freq
+                   (mapcat (fn [[l n]]
+                             (if (pos? n)
+                               (lookup-rec (nth l-dic (- (int l) 97))
+                                           (merge freq {l (dec n)})
+                                           word
+                                           r
+                                           (inc i))
+                               '()))))))) '()))))
+
 (defn lookup
   [dic freq word]
-  (letfn [(re [dic freq [l & r] i]
-            (if (not-empty dic)
-              (let [[words l-dic] (nth dic i)]
-                (if (= (count word) i)
-                  words
-                  (if (some? l)
-                    (re (nth l-dic (- (int l) 97)) freq r (inc i))
-                    (->> freq
-                         (mapcat (fn [[l n]]
-                                   (if (pos? n)
-                                     (re (nth l-dic (- (int l) 97))
-                                         (merge freq {l (dec n)})
-                                         r
-                                         (inc i))
-                                     '())))))))
-              '()))]
-    (re dic freq word 0)))
+  (lookup-rec dic freq word word 0))
