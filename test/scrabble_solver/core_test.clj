@@ -1,4 +1,4 @@
-(ns scrabble-solver-clj.core-test
+(ns scrabble-solver.core-test
   (:require [clojure.test :refer :all]
             [scrabble-solver-clj.core :refer :all]))
 

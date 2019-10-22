@@ -1,4 +1,4 @@
-(ns scrabble-solver-clj.tree-dic
+(ns scrabble-solver.tree-dic
   (:require [clojure.core.reducers :as r]))
 
 (def test-words '("aa" "abc" "no"))
