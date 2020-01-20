@@ -1,38 +1,10 @@
 (ns scrabble-solver.solver
   (:require [clojure.set :as set]
-            [clojure.core.reducers :as r]
             [clojure.string :as s]
             [clojure.math.combinatorics :as combo])
-  (:use [scrabble-solver.tree-dic]))
-
-(def letter-values
-  {\a 1 \b 3 \c 3 \d 2 \e 1 \f 5 \g 2 \h 5 \i 1 \j 8 \k 10 \l 2 \m 2 \n 1 \o 1 \p 3 \q 10 \r 1 \s 1 \t 1 \u 2 \v 8 \w 10 \x 10 \y 10 \z 10})
-
-(def bonuses
-  (hash-map
-    [0 0] :l3 [2 0] :w3 [8 0] :w3 [10 0] :l3 [1 1] :w2 [5 1] :w2 [9 1] :w2 [0 2] :w3 [2 2] :l3 [4 2] :l2 [6 2] :l2 [8 2] :l3 [10 2] :w3 [3 3] :l3 [7 3] :l3 [2 4] :l2 [8 4] :w2 [1 5] :w2 [9 5] :l2 [2 6] :l2 [8 6] :l3 [3 7] :l3 [7 7] :l3 [0 8] :l3 [2 8] :l2 [4 8] :l2 [6 8] :l2 [8 8] :l3 [10 8] :w3 [1 9] :w2 [5 9] :w2 [9 9] :w2 [0 10] :l3 [2 10] :w3 [8 10] :w3 [10 10] :l3))
-
-(def available-letters
-  {\a 5 \b 1 \c 1 \d 2 \e 7 \f 1 \g 1 \h 1 \i 4 \j 1 \k 1 \l 2 \m 1 \n 2 \o 4 \p 1 \q 1 \r 2 \s 4 \t 2 \u 1 \v 1 \w 1 \x 1 \y 1 \z 1 \? 2})
-
-(defn opposite-direction
-  [direction]
-  (if (= direction :right)
-    :bottom :right))
-
-(defn if-right
-  [direction then else]
-  (if (= direction :right)
-    then
-    else))
-
-(defn tiles-taken
-  [{:keys [x y direction width word]}]
-  (let [next-pos (fn [i]
-                   (if-right direction
-                     [(+ x i) y]
-                     [x (+ y i)]))]
-    (map next-pos (range (or width (count word))))))
+  (:use [scrabble-solver.util]
+        [scrabble-solver.tree-dic]
+        [scrabble-solver.params]))
 
 (defn find-positions
   [board-letters]
@@ -51,8 +23,8 @@
           :let [tiles (tiles-taken {:x x :y y :direction direction :width w})
                 blanks (into #{}
                              (filter
-                               (fn [[a b]] (nil? (nth board-letters (+ a (* b 11)))))
-                               tiles))
+                              (fn [[a b]] (nil? (nth board-letters (+ a (* b 11)))))
+                              tiles))
                 nblanks (count blanks)
                 first-tile (first tiles)
                 last-tile (last tiles)]
@@ -79,83 +51,19 @@
           ;; At least one tile has a neighbour
           :when (or first-word?
                     (some
-                      (fn [[a b]]
-                        (or
-                          (and (< a 10)
-                               (some? (nth board-letters (+ (inc a) (* b 11)))))
-                          (and (< b 10)
-                               (some? (nth board-letters (+ a (* (inc b) 11)))))
-                          (and (> a 0)
-                               (some? (nth board-letters (+ (dec a) (* b 11)))))
-                          (and (> b 0)
-                               (some? (nth board-letters (+ a (* (dec b) 11)))))))
-                      blanks))]
+                     (fn [[a b]]
+                       (or
+                        (and (< a 10)
+                             (some? (nth board-letters (+ (inc a) (* b 11)))))
+                        (and (< b 10)
+                             (some? (nth board-letters (+ a (* (inc b) 11)))))
+                        (and (> a 0)
+                             (some? (nth board-letters (+ (dec a) (* b 11)))))
+                        (and (> b 0)
+                             (some? (nth board-letters (+ a (* (dec b) 11)))))))
+                     blanks))]
 
       {:x x :y y :direction direction :width w :nblanks nblanks})))
-
-(defn build-tiles-letter-mapping
-  [board]
-  (reduce
-    (fn [acc [[x y] letter]]
-      (assoc acc (+ x (* 11 y)) letter))
-    (into [] (repeat (* 11 11) nil))
-    (mapcat (fn [{:keys [x y direction word] :as wordstate}]
-              (map vector (tiles-taken wordstate) word))
-            board)))
-
-(def empty-freq-list
-  (reduce
-    (fn [m k] (assoc m k 0))
-    {}
-    (map char (range 97 123))))
-
-(defn full-freq
-  [w]
-  (merge-with + empty-freq-list (frequencies w)))
-
-(def valid-words
-  (filter #(<= (count %) 11)
-          (with-open [rdr (clojure.java.io/reader "resources/words")]
-            (map clojure.string/lower-case (into [] (line-seq rdr))))))
-
-(def word-dic
-  (build-dic valid-words))
-
-(def valid-words-set
-  (into #{} valid-words))
-
-(defn read-letter
-  [board-letters [x y]]
-  (nth board-letters
-       (+ x (* 11 y))))
-
-(defn read-freq-from-board
-  [board-letters wordstate]
-  (->> (tiles-taken wordstate)
-       (map (partial read-letter board-letters))
-       (apply str)
-       (full-freq)))
-
-(defn diff-board
-  [a b]
-  (into #{}
-        (for [x (range 11)
-              y (range 11)
-              :let [i (+ x (* 11 y))]
-              :when (and (nil? (nth b i))
-                         (some? (nth a i)))]
-          [x y])))
-
-(defn freq-to-str
-  [freq]
-  (reduce-kv (fn [m k v] (concat m (repeat v k))) '() freq))
-
-(defn rotate-board
-  [board]
-  (map (fn [{:keys [x y direction] :as wordstate}]
-         (merge wordstate
-                {:x y :y x :direction (opposite-direction direction)}))
-       board))
 
 (defn get-score
   [available-letters-freq board-letters [{:keys [word] :as solution} & solutions]]
@@ -169,27 +77,27 @@
              w2 (not-empty (filter #{:w2} bonuses))
              w3 (not-empty (filter #{:w3} bonuses))]
 
-         (* (if w2 2 (if w3 3 1))
-            (if (= 7 (count (filter identity scored)))
-              50
-              (->> (map vector tiles scored word values bonuses)
-                   (reduce
-                     (fn [{:keys [score available-letters] :as m}
-                         [[x y] scored l value bonus]]
+         (+ (if (= 7 (count (filter identity scored)))
+              35 0)
+            (* (if w2 2 (if w3 3 1))
+               (->> (map vector tiles scored word values bonuses)
+                    (reduce
+                      (fn [{:keys [score available-letters] :as m}
+                          [[x y] scored l value bonus]]
 
-                       (let [joker (and scored (zero? (get available-letters l 1)))]
-                         
-                         {:score (+ score (* (if joker 0 value)
-                                             (if scored (get {:l2 2 :l3 3} bonus 1) 1)))
+                        (let [joker (and scored (zero? (get available-letters l 1)))]
+                          
+                          {:score (+ score (* (if joker 0 value)
+                                              (if scored (get {:l2 2 :l3 3} bonus 1) 1)))
 
-                          :available-letters (if (and scored (not joker))
-                                               (update available-letters l - 1)
-                                               available-letters)}))
-                     
-                     {:score 0
-                      :available-letters available-letters-freq})
-                   
-                   (:score))))))))
+                           :available-letters (if (and scored (not joker))
+                                                (update available-letters l - 1)
+                                                available-letters)}))
+                      
+                      {:score 0
+                       :available-letters available-letters-freq})
+                    
+                    (:score))))))))
 
 (declare find-all-possible-words)
 
@@ -264,46 +172,41 @@
                                                           (apply str))))
                         (map #(select-keys % [:score :x :y :direction :word :letters-used]))))))))
 
+(declare find-solutions)
+
+(defn with-potential-next-score
+  [board available-letters-freq depth solutions]
+  (if (pos? depth)
+    solutions
+    (->> solutions
+         (map (fn [{:keys [letters-used] :as sol}]
+                (let [board (cons sol board)
+                      letters-used-freq (full-freq letters-used)
+                      njokers (reduce-kv (fn [s k v] (if (pos? v) (+ s v) s))
+                                         0
+                                         (merge-with - letters-used-freq available-letters-freq))
+                      available-letters-freq (merge-with - available-letters-freq {\? njokers})
+                      letters (freq-to-str (merge-with - available-letters-freq letters-used-freq))]
+                  (-> sol
+                      (assoc :potential-next-word
+                             (first (find-solutions board letters (inc depth))))
+                      (#(assoc % :combined-score (+ (:score %)
+                                                    (or (some-> % :potential-next-word :score) 0)))))))))))
+
 (defn find-solutions
-  [board letters n]
-  (let [board-letters (build-tiles-letter-mapping board)
-        available-letters-freq (full-freq letters)
+  ([board letters] (find-solutions board letters 0))
+  ([board letters depth]
+   (let [board-letters (build-tiles-letter-mapping board)
+         available-letters-freq (full-freq letters)
 
-        positions (find-positions board-letters)
+         positions (find-positions board-letters)
 
-        solutions (find-all-possible-words
-                    board
-                    board-letters
-                    available-letters-freq
-                    positions)]
+         solutions (find-all-possible-words
+                     board
+                     board-letters
+                     available-letters-freq
+                     positions)]
 
-    (take n (sort-by :score > solutions))))
-
-(defn play [nplayers]
-  ((fn [{:keys [board draw turn available-letters] :as state}]
-     (let [player (mod turn nplayers)
-           player-draw (get draw player)
-           player-new-draw (apply str (concat player-draw
-                                              (take (- 7 (count player-draw))
-                                                    available-letters)))]
-       
-       (if-let [{:keys [x y direction word letters-used] :as solution}
-                (first (find-solutions board player-new-draw 1))]
-
-         (do (println "player" (inc player) "draw")
-             (pprint player-new-draw)
-             (println "player" (inc player) "has played the word")
-             (pprint solution)
-
-             (recur {:board (cons solution board)
-                     :turn (inc turn)
-                     :draw (update draw player #(freq-to-str (merge-with - (full-freq letters-used) (full-freq %))))
-                     :available-letters (drop (- 7 (count player-draw)) available-letters)}))
-
-         (do (println "player" (inc player) "cannot play any word, end of game")
-             state))))
-
-   {:board '()
-    :turn 0
-    :draw (into [] (repeat nplayers ""))
-    :available-letters (shuffle (freq-to-str available-letters))}))
+     (->> solutions
+          (sort-by :score >)
+          (with-potential-next-score board available-letters-freq depth)))))
